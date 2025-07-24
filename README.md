@@ -1,268 +1,137 @@
-\# E-Paper Junction Relay
+# JunctionRelay ePaper
 
+A 4-color e-paper dashboard client for Raspberry Pi using the **Waveshare 5.79" display (epd5in79g)**.  
+Displays live sensor data via the JunctionRelay protocol and hosts an HTTP API for inbound communication.
 
+---
 
-Python implementation of Junction Relay protocol for e-paper displays.
+## ✨ Features
 
+- Supports Waveshare 5.79" 4-color e-paper (black, white, red, yellow)
+- Renders real-time sensor values on screen
+- Includes system stats, startup screen, and color-coded layout
+- HTTP API with configurable data ingestion
+- Fully native Python — no Docker needed
 
+---
 
-\## Features
+## 🧰 Requirements
 
+- Raspberry Pi (Zero, 3, 4, 5) with Raspberry Pi OS
+- Waveshare 5.79" e-Paper Display (model `epd5in79g`)
+- SPI enabled in Pi config
+- Python 3.7 or newer
 
+---
 
-\- \*\*Full Junction Relay Protocol Support\*\*: Handles all 4 data types
+## 🚀 Installation
 
-&nbsp; - Type 1: Raw JSON
-
-&nbsp; - Type 2: Prefixed JSON  
-
-&nbsp; - Type 3: Raw Gzip
-
-&nbsp; - Type 4: Prefixed Gzip
-
-\- \*\*HTTP API\*\*: Compatible endpoints with ESP32 Junction Relay devices
-
-\- \*\*Real-time Display\*\*: Updates e-paper display with live sensor data
-
-\- \*\*Background Processing\*\*: Queued processing for sensor and config data
-
-\- \*\*Docker Ready\*\*: Containerized deployment
-
-\- \*\*Hardware Support\*\*: Waveshare 5.79" G e-paper display
-
-
-
-\## Quick Start
-
-
-
-\### Local Development
+### 1. Clone the repository
 
 ```bash
-
-\# Install dependencies
-
-pip install -r requirements.txt
-
-
-
-\# Run the service
-
-python main.py
-
+git clone https://github.com/catapultcase/JunctionRelay_ePaper.git
+cd JunctionRelay_ePaper
 ```
 
+---
 
-
-\### Docker Deployment
+### 2. Enable SPI
 
 ```bash
-
-\# Build and run
-
-docker-compose up -d
-
-
-
-\# View logs
-
-docker-compose logs -f
-
+sudo raspi-config
+# → Interface Options → SPI → Enable → Reboot if prompted
 ```
 
+---
 
-
-\## API Endpoints
-
-
-
-\- `POST /api/data` - Main data ingestion (Junction Relay protocol)
-
-\- `GET /api/device/info` - Device information
-
-\- `GET /api/system/stats` - System statistics
-
-\- `GET /api/connection/status` - Connection status
-
-\- `GET /api/health/heartbeat` - Health check
-
-
-
-\## Data Format
-
-
-
-Send data in Junction Relay format:
-
-
+### 3. Install dependencies
 
 ```bash
-
-\# Raw JSON (Type 1)
-
-curl -X POST http://pi:5000/api/data \\
-
-&nbsp; -H "Content-Type: application/json" \\
-
-&nbsp; -d '{"type":"sensor","temperature":22.5,"humidity":45.2}'
-
-
-
-\# Prefixed JSON (Type 2) 
-
-\# 8-byte prefix: LLLLTTRR (length + type + route)
-
-\# Example: 0050000 = 50 bytes, type 00 (JSON), route 00
-
-```
-
-
-
-\## Hardware Setup
-
-
-
-1\. Connect Waveshare 5.79" G display to Pi SPI
-
-2\. Enable SPI: `sudo raspi-config`
-
-3\. Install Waveshare libraries in `lib/` directory
-
-
-
-\## Configuration
-
-
-
-Edit `config.json`:
-
-```json
-
-{
-
-&nbsp; "display": {
-
-&nbsp;   "refresh\_interval": 60,
-
-&nbsp;   "theme": "default"
-
-&nbsp; },
-
-&nbsp; "network": {
-
-&nbsp;   "http\_port": 5000
-
-&nbsp; }
-
-}
-
-```
-
-
-
-\## Architecture
-
-
-
-```
-
-Backend → HTTP POST → StreamProcessor → SensorDisplay → E-Paper
-
-&nbsp;                   ↓
-
-&nbsp;             \[4 Protocol Types]
-
-```
-
-
-
-Same architecture as ESP32 Junction Relay devices, enabling unified data flow.
-
-
-
-\## Installation
-
-
-
-Run the installation script:
-
-```bash
-
-chmod +x install.sh
-
-./install.sh
-
-```
-
-
-
-Or install manually:
-
-```bash
-
-\# Install system dependencies
-
 sudo apt update
-
-sudo apt install python3 python3-pip libfreetype6-dev libjpeg-dev
-
-
-
-\# Enable SPI
-
-sudo raspi-config nonint do\_spi 0
-
-
-
-\# Install Python packages
-
+sudo apt install python3-pip fonts-dejavu
 pip3 install -r requirements.txt
-
-
-
-\# Run the service
-
-python3 main.py
-
 ```
 
+---
 
+### 4. Install Waveshare driver (required once)
 
-\## Testing
-
-
-
-Test the API endpoints:
+Create the driver directory and download the two required files:
 
 ```bash
+mkdir -p lib/waveshare_epd
+cd lib/waveshare_epd
 
-\# Health check
-
-curl http://localhost:5000/api/health/heartbeat
-
-
-
-\# Device info
-
-curl http://localhost:5000/api/device/info
-
-
-
-\# Send sensor data
-
-curl -X POST http://localhost:5000/api/data \\
-
-&nbsp; -H "Content-Type: application/json" \\
-
-&nbsp; -d '{"type":"sensor","temperature":22.5,"humidity":45.2,"pressure":1013}'
-
+wget https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epd5in79g.py
+wget https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epdconfig.py
 ```
 
+---
 
+### 5. Run the application
 
-\## License
+You **must use sudo** to:
+- Bind to port 80
+- Access `/dev/spidev*` and `/dev/gpiomem*`
 
+```bash
+cd ~/JunctionRelay_ePaper
+sudo python3 main.py
+```
 
+---
 
-MIT License - Same as Junction Relay project
+## ✅ Result
 
+- Your e-paper display will show the startup layout
+- HTTP server will run on port `80`
+- Accepts:
+  - `POST /api/data` — Ingests sensor/config data
+  - `GET  /api/device/info` — Returns device info
+  - `GET  /api/system/stats` — Returns status
+
+---
+
+## 📄 `requirements.txt`
+
+```
+Flask==2.3.3
+Pillow==10.0.1
+psutil==5.9.0
+gpiozero==1.6.2
+spidev
+RPi.GPIO
+```
+
+---
+
+## ⚠️ Notes
+
+- This project does **not** use Docker (on purpose) — native Pi support is simpler and more robust
+- A wrapper (`epaper_wrapper.py`) manages hardware access and ensures fallback-friendly startup
+- If you don’t use port 80, modify `http_endpoints.py` to change the server port
+
+---
+
+## 🔁 Optional: Auto-start on boot
+
+If you'd like this to run at startup, you can create a `systemd` service.  
+Let us know and we can provide a ready-made file.
+
+---
+
+## 📸 Screenshot
+
+*Coming soon: preview of live sensor dashboard*
+
+---
+
+## 🪪 License
+
+MIT or GPL-3 — pick your preferred license.
+
+---
+
+## 👋 Credits
+
+Created by [@catapultcase](https://github.com/catapultcase) for the JunctionRelay ecosystem.
