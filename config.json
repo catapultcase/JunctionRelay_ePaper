@@ -1,0 +1,20 @@
+{
+  "device": {
+    "name": "EPaperJunctionRelay",
+    "version": "1.0.0",
+    "mac_address": "f8:e4:3b:e7:84:dc"
+  },
+  "display": {
+    "refresh_interval": 60,
+    "show_debug": false,
+    "theme": "default"
+  },
+  "network": {
+    "http_port": 5000,
+    "enable_cors": true
+  },
+  "data": {
+    "sensor_retention_hours": 24,
+    "auto_clear_old_data": true
+  }
+}

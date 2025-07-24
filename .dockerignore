@@ -1,0 +1,49 @@
+# Docker ignore file for E-Paper Junction Relay
+
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+docs/
+
+# Development files
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local development
+venv/
+env/
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Docker files (not needed inside image)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Scripts
+build-and-push.sh
