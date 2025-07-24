@@ -1,108 +1,73 @@
-# JunctionRelay ePaper Node
+# JunctionRelay ePaper – Installation Guide
 
-A Python-based e-paper display renderer for JunctionRelay sensor data. Designed for Raspberry Pi (tested on Pi 5) with a 5.79" Waveshare color e-paper display (epd5in79g).
-
----
-
-## 📦 Features
-
-- Real-time sensor rendering from JunctionRelay payloads
-- Dynamic screen updates
-- Headless safe mode (saves image for preview if no hardware)
-- Fully self-contained (no Docker required)
+This guide assumes:
+- You're using a Raspberry Pi (64-bit OS)
+- You want to run the ePaper UI on a Waveshare 5.79" display
+- You want clean install instructions that work without manual patching
 
 ---
 
-## ⚙️ Hardware Requirements
-
-- Raspberry Pi (Pi 5 recommended)
-- Waveshare 5.79" Color e-Paper (Model: **epd5in79g**)
-- SPI and GPIO pins connected as per Waveshare wiring guide
-
----
-
-## 🚀 Installation Instructions
-
-### 1. Clone this repository
+## 1. Clone the project and enter it
 
 ```bash
-git clone https://github.com/catapultcase/JunctionRelay_ePaper
+git clone https://github.com/jonmillsdev/JunctionRelay_ePaper.git
 cd JunctionRelay_ePaper
 ```
 
-### 2. Create and activate a virtual environment
+---
+
+## 2. Create a virtual environment and activate it
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
 
-### 3. Install Python dependencies
+---
+
+## 3. Install required system packages
 
 ```bash
+sudo apt update
+sudo apt install -y python3-lgpio python3-pip libopenjp2-7
+```
+
+---
+
+## 4. Install Python dependencies
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
+pip install lgpio==0.2.2.0
 ```
-
-This will install:
-- Flask
-- Pillow
-- psutil
-- gpiozero
-- spidev
-- RPi.GPIO
-- waveshare-epaper (if present on PyPI)
-- all other necessary packages
-
-> ⚠️ `RPi.GPIO` and `psutil` may show deprecation warnings during install — these are safe to ignore for now.
 
 ---
 
-## 📁 Optional: Add the actual e-Paper driver (if not using PyPI version)
-
-If you want to bundle the latest **Waveshare drivers** directly from source:
+## 5. Run the application with proper GPIO backend
 
 ```bash
-git clone https://github.com/waveshareteam/e-Paper.git temp_epd
-cp -r temp_epd/RaspberryPi_JetsonNano/python/lib/waveshare_epd ./waveshare_epd
-rm -rf temp_epd
-touch waveshare_epd/__init__.py  # Ensures it’s a valid package
+sudo -E env "GPIOZERO_PIN_FACTORY=lgpio" python main.py
 ```
 
-> If you get import errors from `sensor_display.py`, make sure to use:
-> ```python
-> import waveshare_epd.epd5in79g as epd5in79g
-> ```
+> This starts the ePaper UI, initializes the display, and launches the web server at http://<your-pi-ip>:80
 
 ---
 
-## 🖥️ Run the app
+## 6. Test Access
 
-```bash
-python main.py
+From your browser (on same LAN):
+
 ```
-
-- On first launch, you’ll see a JunctionRelay startup screen.
-- When sensor payloads are received, the screen updates.
-- If hardware is not detected, an image will be saved to your temp folder (`/tmp/epaper_display.png`).
-
----
-
-## 🧪 Test Without Hardware
-
-You can run the app on any system (like macOS or a Pi without the display) and it will render to an image for debugging.
-
----
-
-## 🛑 Exiting
-
-To deactivate the virtual environment:
-
-```bash
-deactivate
+http://<your-raspberry-pi-ip>:80
 ```
 
 ---
 
-## 📜 License
+## ✅ DONE
 
-This project is released under the GPLv3 license.
+The ePaper display should now:
+- Power on
+- Show sensor display layout
+- Be reachable via HTTP
+- Auto-refresh when updates arrive
