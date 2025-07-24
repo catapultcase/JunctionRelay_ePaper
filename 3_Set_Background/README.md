@@ -11,7 +11,7 @@ This guide assumes:
 
 ```bash
 git clone https://github.com/catapultcase/JunctionRelay_ePaper.git
-cd JunctionRelay_ePaper
+cd JunctionRelay_ePaper/3_Set_Background
 ```
 
 ---
