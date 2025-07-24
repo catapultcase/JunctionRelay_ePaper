@@ -10,7 +10,7 @@ This guide assumes:
 ## 1. Clone the project and enter it
 
 ```bash
-git clone https://github.com/jonmillsdev/JunctionRelay_ePaper.git
+git clone https://github.com/catapultcase/JunctionRelay_ePaper.git
 cd JunctionRelay_ePaper
 ```
 
