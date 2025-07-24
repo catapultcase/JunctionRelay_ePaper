@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Dict, Any
 from PIL import Image, ImageDraw, ImageFont
 
-from waveshare_epd import epd5in79g
+import waveshare_epd.epd5in79g as epd5in79g
 
 class SensorDisplay:
     def __init__(self, config):

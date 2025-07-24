@@ -1,1 +1,1 @@
-docker buildx build --platform linux/amd64,linux/arm64 --tag catapultcase/junctionrelay-epaper:latest --tag catapultcase/junctionrelay-epaper:1.0.1 --push .
+rm -rf ~/JunctionRelay_ePaper
