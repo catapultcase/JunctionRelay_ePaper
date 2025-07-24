@@ -158,7 +158,7 @@ class SensorDisplay:
             print(f"[SensorDisplay] Updated sensor data: {len(data)} items")
 
     def update_config(self, payload: Dict[str, Any]):
-        """Handle configuration updates including background settings"""
+        """Handle configuration updates including background settings - NO REFRESH"""
         print(f"[SensorDisplay] Config update received: {payload.get('type', 'unknown')}")
         
         # Handle background color in eink config
@@ -166,7 +166,6 @@ class SensorDisplay:
             bg_color = payload["eink"]["background_color"]
             if isinstance(bg_color, list) and len(bg_color) == 3:
                 self.set_background_color(tuple(bg_color))
-                self._refresh_display()
                 print(f"[SensorDisplay] Background color updated from config: {bg_color}")
         
         # Handle background image in eink config
@@ -176,11 +175,9 @@ class SensorDisplay:
             
             if isinstance(bg_data, str):
                 self.set_background_from_base64(bg_data, opacity)
-                self._refresh_display()
                 print("[SensorDisplay] Background image updated from config")
             elif isinstance(bg_data, bytes):
                 self.set_background_image(bg_data, opacity)
-                self._refresh_display()
                 print("[SensorDisplay] Background image updated from config")
 
         # Handle top-level background settings (fallback)
@@ -188,7 +185,6 @@ class SensorDisplay:
             bg_color = payload["background_color"]
             if isinstance(bg_color, list) and len(bg_color) == 3:
                 self.set_background_color(tuple(bg_color))
-                self._refresh_display()
                 print(f"[SensorDisplay] Background color updated from top-level config: {bg_color}")
 
         if "background_image" in payload:
@@ -197,7 +193,6 @@ class SensorDisplay:
             
             if isinstance(bg_data, str):
                 self.set_background_from_base64(bg_data, opacity)
-                self._refresh_display()
                 print("[SensorDisplay] Background image updated from top-level config")
 
     def show_status_screen(self):
