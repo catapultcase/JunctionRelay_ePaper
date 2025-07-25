@@ -12,7 +12,7 @@ import tempfile
 import base64
 import io
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Tuple, List
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
@@ -64,47 +64,73 @@ class SensorDisplay:
             self.font_tiny = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 14)
         except Exception as e:
             print(f"[SensorDisplay] WARNING: Failed to load fonts: {e}")
-            self.font_big = ImageFont.load_default()
-            self.font_medium = ImageFont.load_default()
-            self.font_small = ImageFont.load_default()
-            self.font_tiny = ImageFont.load_default()
+            # Fallback to default fonts
+            try:
+                self.font_big = ImageFont.load_default()
+                self.font_medium = ImageFont.load_default()
+                self.font_small = ImageFont.load_default()
+                self.font_tiny = ImageFont.load_default()
+            except:
+                # If even default fonts fail, create minimal font objects
+                self.font_big = None
+                self.font_medium = None
+                self.font_small = None
+                self.font_tiny = None
 
-    def _parse_utc_datetime(self, datetime_str: str) -> Optional[datetime]:
-        """Parse UTC datetime string and convert to local timezone"""
-        if not datetime_str:
-            return None
-        
+    def _convert_utc_to_local(self, utc_time_str: str) -> str:
+        """Convert UTC time string to device local time"""
         try:
-            # Handle both formats: "2025-08-08T01:00:00Z" and "01:00"
-            if 'T' in datetime_str and datetime_str.endswith('Z'):
-                # Full datetime with Z suffix (UTC)
-                utc_dt = datetime.strptime(datetime_str, "%Y-%m-%dT%H:%M:%SZ")
-                # Convert UTC to local time
-                utc_timestamp = utc_dt.timestamp()
-                local_dt = datetime.fromtimestamp(utc_timestamp)
-                return local_dt
-            elif ':' in datetime_str and len(datetime_str) == 5:
-                # Just time format "HH:MM" - assume it's already UTC and convert to local
-                # We need a date to work with, so use today
+            # Handle both "HH:MM" and full datetime formats
+            if ':' in utc_time_str and len(utc_time_str.split(':')) == 2:
+                # Simple time format "HH:MM" 
+                hour, minute = map(int, utc_time_str.split(':'))
+                
+                # Create UTC datetime for today with this time
                 today = datetime.now().date()
-                utc_time = datetime.strptime(f"{today} {datetime_str}", "%Y-%m-%d %H:%M")
-                # Convert assuming this time is in UTC
-                utc_timestamp = utc_time.replace(tzinfo=None).timestamp() - time.timezone
-                local_dt = datetime.fromtimestamp(utc_timestamp)
-                return local_dt
+                utc_dt = datetime.combine(today, datetime.min.time().replace(hour=hour, minute=minute))
+                utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+                
+                # Convert to local time
+                local_dt = utc_dt.astimezone()
+                return local_dt.strftime("%H:%M")
+                
+            elif 'T' in utc_time_str and utc_time_str.endswith('Z'):
+                # Full datetime format "2025-08-08T01:00:00Z"
+                utc_dt = datetime.fromisoformat(utc_time_str.replace('Z', '+00:00'))
+                local_dt = utc_dt.astimezone()
+                return local_dt.strftime("%H:%M")
             else:
-                print(f"[SensorDisplay] Unrecognized datetime format: {datetime_str}")
-                return None
+                # Unknown format, return as-is
+                return utc_time_str
+                
         except Exception as e:
-            print(f"[SensorDisplay] Error parsing datetime '{datetime_str}': {e}")
-            return None
+            print(f"[SensorDisplay] Error converting time '{utc_time_str}': {e}")
+            return utc_time_str  # Return original if conversion fails
 
-    def _format_local_time(self, datetime_str: str) -> str:
-        """Convert UTC time string to local time string"""
-        local_dt = self._parse_utc_datetime(datetime_str)
-        if local_dt:
-            return local_dt.strftime("%H:%M")
-        return datetime_str  # Fallback to original if parsing fails
+    def _draw_last_updated(self, draw):
+        """Draw 'Last Updated: HH:MM:SS' in top right corner"""
+        if not self.font_tiny:
+            return  # Skip if font not available
+            
+        if self.last_update:
+            update_text = f"Last Updated: {self.last_update.strftime('%H:%M:%S')}"
+        else:
+            update_text = "Last Updated: Never"
+        
+        # Calculate text width for right alignment
+        try:
+            bbox = draw.textbbox((0, 0), update_text, font=self.font_tiny)
+            text_width = bbox[2] - bbox[0]
+        except:
+            # Fallback if textbbox not available
+            text_width = len(update_text) * 8
+        
+        # Position in top right with margin
+        x = self.width - text_width - 10
+        y = 5
+        
+        # Draw with gray color
+        draw.text((x, y), update_text, font=self.font_tiny, fill=(128, 128, 128))
 
     def set_background_image(self, image_data: bytes, opacity: float = 1.0):
         """Set background image from binary data"""
@@ -172,50 +198,6 @@ class SensorDisplay:
         
         return canvas
 
-    def show_startup_screen(self):
-        if not self.initialized:
-            return
-        image = self._create_base_canvas()
-        draw = ImageDraw.Draw(image)
-        
-        # Draw last updated in top right corner
-        self._draw_last_updated(draw)
-        
-        if self.layout_type == "calendar":
-            self._render_calendar_layout(draw, {})
-        else:
-            self._draw_static_content(draw)
-            self._draw_sensor_table(draw, {})
-        
-        self._update_display(image)
-        print("[SensorDisplay] Startup screen displayed")
-
-    def _draw_last_updated(self, draw):
-        """Draw last updated timestamp in top right corner"""
-        if self.last_update:
-            update_text = f"Last Updated: {self.last_update.strftime('%H:%M:%S')}"
-        else:
-            update_text = "Last Updated: Never"
-        
-        # Calculate text width to right-align
-        try:
-            if hasattr(self.font_tiny, 'getbbox'):
-                bbox = self.font_tiny.getbbox(update_text)
-                text_width = bbox[2] - bbox[0]
-            elif hasattr(self.font_tiny, 'getsize'):
-                text_width = self.font_tiny.getsize(update_text)[0]
-            else:
-                text_width = len(update_text) * 7
-        except:
-            text_width = len(update_text) * 7
-        
-        # Position in top right corner with small margin
-        x = self.width - text_width - 5
-        y = 3
-        
-        # Draw with subtle color
-        draw.text((x, y), update_text, font=self.font_tiny, fill=(128, 128, 128))
-
     def _create_base_canvas(self) -> Image.Image:
         """Create the base canvas with background"""
         if self.background_mode == "image" and self.background_image:
@@ -226,6 +208,24 @@ class SensorDisplay:
             canvas = Image.new('RGB', (self.width, self.height), (255, 255, 255))
             
         return canvas
+
+    def show_startup_screen(self):
+        if not self.initialized:
+            return
+        image = self._create_base_canvas()
+        draw = ImageDraw.Draw(image)
+        
+        # Draw last updated timestamp
+        self._draw_last_updated(draw)
+        
+        if self.layout_type == "calendar":
+            self._render_calendar_layout(draw, {})
+        else:
+            self._draw_static_content(draw)
+            self._draw_sensor_table(draw, {})
+        
+        self._update_display(image)
+        print("[SensorDisplay] Startup screen displayed")
 
     def update_sensor_data(self, payload: Dict[str, Any]):
         if not self.initialized:
@@ -291,12 +291,15 @@ class SensorDisplay:
         image = self._create_base_canvas()
         draw = ImageDraw.Draw(image)
         
-        # Draw last updated in top right corner
+        # Draw last updated timestamp
         self._draw_last_updated(draw)
         
-        y = 20
-        draw.text((20, y), "System Status", font=self.font_big, fill=(0, 0, 0))
-        y += 80
+        # Content starts below the timestamp
+        y = 30
+        if self.font_big:
+            draw.text((20, y), "System Status", font=self.font_big, fill=(0, 0, 0))
+            y += 80
+        
         status_info = [
             f"MAC: {self._get_mac_address()}",
             f"Uptime: {self._get_uptime()}",
@@ -305,9 +308,12 @@ class SensorDisplay:
             f"Background: {self.background_mode}",
             f"Layout: {self.layout_type}"
         ]
+        
         for info in status_info:
-            draw.text((20, y), info, font=self.font_medium, fill=(0, 0, 0))
+            if self.font_medium:
+                draw.text((20, y), info, font=self.font_medium, fill=(0, 0, 0))
             y += 40
+            
         self._update_display(image)
 
     def _extract_sensor_data(self, payload: Dict[str, Any]) -> Dict[str, str]:
@@ -344,7 +350,7 @@ class SensorDisplay:
         image = self._create_base_canvas()
         draw = ImageDraw.Draw(image)
         
-        # Always draw last updated in top right corner
+        # Always draw last updated timestamp
         self._draw_last_updated(draw)
         
         if self.layout_type == "calendar":
@@ -385,7 +391,7 @@ class SensorDisplay:
             return []
 
     def _render_calendar_layout(self, draw, sensor_data: Dict[str, str]):
-        """Render TV Guide style calendar layout - proper 2-column table per day"""
+        """Render TV Guide style calendar layout"""
         print(f"[DEBUG] Calendar render called with {len(sensor_data)} sensors")
         
         # Count day sensors to determine layout
@@ -394,27 +400,27 @@ class SensorDisplay:
         
         if column_count == 0:
             # No day sensors found, show message
-            draw.text((50, 100), "No episode data available", font=self.font_medium, fill=(0, 0, 0))
+            if self.font_medium:
+                draw.text((50, 100), "No episode data available", font=self.font_medium, fill=(0, 0, 0))
             return
         
-        # Full screen layout - use entire display with proper spacing
-        # Account for last updated text at top (reserve 20px)
+        # Layout starts below the timestamp (reserve top 25px)
         header_height = 45
-        content_start_y = 25  # Start below the "Last Updated" text
-        column_separator_width = 30  # Wider separation between day columns
+        content_start_y = 30  # Start below timestamp
+        column_separator_width = 30
         
-        # Calculate day column width with separator space
+        # Calculate day column width
         total_separator_width = (column_count - 1) * column_separator_width
-        available_width = self.width - 20 - total_separator_width  # 10px margins + separator space
+        available_width = self.width - 20 - total_separator_width
         day_column_width = available_width // column_count
         
         # Within each day column: TIME | TITLE structure
-        time_column_width = 50   # Fixed width for time
-        title_column_width = day_column_width - time_column_width - 10  # Remaining for titles
+        time_column_width = 50
+        title_column_width = day_column_width - time_column_width - 10
         
-        print(f"[DEBUG] Display: {self.width}x{self.height}, Day column: {day_column_width}, Time: {time_column_width}, Title: {title_column_width}")
+        print(f"[DEBUG] Display: {self.width}x{self.height}, Day column: {day_column_width}")
         
-        # Column headers mapping with date only for Today
+        # Column headers
         today = datetime.now()
         yesterday = today - timedelta(days=1)
         tomorrow = today + timedelta(days=1)
@@ -428,13 +434,13 @@ class SensorDisplay:
         # Render each day column
         for col_index, sensor_key in enumerate(day_sensor_keys):
             day_x_start = 10 + (col_index * (day_column_width + column_separator_width))
-            print(f"[DEBUG] Day column {col_index} ({sensor_key}) at x={day_x_start}")
             
             # Draw day header
             header_text = header_map.get(sensor_key, sensor_key)
-            draw.text((day_x_start + 5, content_start_y), header_text, font=self.font_medium, fill=(0, 0, 0))
+            if self.font_medium:
+                draw.text((day_x_start + 5, content_start_y), header_text, font=self.font_medium, fill=(0, 0, 0))
             
-            # Draw day column separator line (except for first column)
+            # Draw separator line (except for first column)
             if col_index > 0:
                 line_x = day_x_start - (column_separator_width // 2)
                 draw.line((line_x, content_start_y, line_x, self.height - 10), fill=(128, 128, 128), width=1)
@@ -443,40 +449,37 @@ class SensorDisplay:
             draw.line((day_x_start + 5, content_start_y + 35, day_x_start + day_column_width - 10, content_start_y + 35), 
                      fill=(0, 0, 0), width=1)
             
-            # Parse and render episodes for this day (start right after header)
-            episodes_start_y = content_start_y + header_height + 5
-            episodes_y = episodes_start_y
+            # Render episodes
+            episodes_y = content_start_y + header_height + 5
             
             if sensor_key in sensor_data:
                 episodes = self._parse_episode_json(sensor_data[sensor_key])
                 print(f"[DEBUG] Rendering {len(episodes)} episodes for {sensor_key}")
                 
                 if not episodes:
-                    # Empty day
                     title_x = day_x_start + 8 + time_column_width + 15
-                    draw.text((title_x, episodes_y), "No episodes", 
-                             font=self.font_small, fill=(128, 128, 128))
+                    if self.font_small:
+                        draw.text((title_x, episodes_y), "No episodes", 
+                                 font=self.font_small, fill=(128, 128, 128))
                 else:
-                    # Render each episode in table rows
                     for episode_idx, episode in enumerate(episodes):
-                        row_height = 44  # Fixed height per episode row (for 2 lines max)
+                        row_height = 44
                         
-                        if episodes_y + row_height > self.height - 10:  # Prevent overflow
-                            print(f"[DEBUG] Stopping at episode {episode_idx} due to overflow at y={episodes_y}")
+                        if episodes_y + row_height > self.height - 10:
                             break
                         
-                        # Extract episode info
+                        # Extract and convert episode info
                         series = episode.get('series', 'Unknown Show')
                         air_time = episode.get('airTime', '')
                         
                         # Convert UTC time to local time
                         if air_time:
-                            local_time = self._format_local_time(air_time)
-                            print(f"[DEBUG] Converted time {air_time} -> {local_time}")
+                            local_time = self._convert_utc_to_local(air_time)
+                            print(f"[DEBUG] Converted {air_time} -> {local_time}")
                         else:
-                            local_time = air_time
+                            local_time = ""
                         
-                        # Clean up series name (remove episode details after " - ")
+                        # Clean up series name
                         if ' - ' in series:
                             show_name = series.split(' - ')[0]
                             episode_part = series.split(' - ', 1)[1]
@@ -484,51 +487,47 @@ class SensorDisplay:
                         else:
                             display_text = series
                         
-                        # Calculate positions with more padding between columns
-                        time_x = day_x_start + 8  # 3px extra padding from left edge
-                        title_x = day_x_start + 8 + time_column_width + 15  # 15px gap between columns (was 8px)
+                        # Position calculations
+                        time_x = day_x_start + 8
+                        title_x = day_x_start + 8 + time_column_width + 15
                         
-                        # Render TIME column (fixed position, single line) - use local time
-                        if local_time:
-                            draw.text((time_x, episodes_y + 2), local_time, font=self.font_small, fill=(0, 0, 0))  # +2px top padding
+                        # Render TIME column (converted to local time)
+                        if local_time and self.font_small:
+                            draw.text((time_x, episodes_y + 2), local_time, font=self.font_small, fill=(0, 0, 0))
                         
-                        # Render TITLE column with wrapping constrained to this row
-                        self._draw_wrapped_text_in_row(
-                            draw, display_text, title_x, episodes_y + 2, 
-                            title_column_width - 23, row_height - 4, self.font_small, (0, 0, 0)  # -23px for padding (was -16px)
-                        )
+                        # Render TITLE column with wrapping
+                        if self.font_small:
+                            self._draw_wrapped_text_in_row(
+                                draw, display_text, title_x, episodes_y + 2, 
+                                title_column_width - 23, row_height - 4, self.font_small, (0, 0, 0)
+                            )
                         
-                        episodes_y += row_height  # Move to next row
+                        episodes_y += row_height
             else:
-                # Sensor not found
-                print(f"[DEBUG] Sensor {sensor_key} not found in data")
                 title_x = day_x_start + 8 + time_column_width + 15
-                draw.text((title_x, episodes_y), "No data", 
-                         font=self.font_small, fill=(128, 128, 128))
+                if self.font_small:
+                    draw.text((title_x, episodes_y), "No data", 
+                             font=self.font_small, fill=(128, 128, 128))
         
         print("[DEBUG] Calendar rendering complete")
 
-    def _draw_wrapped_text_in_row(self, draw, text: str, x: int, y: int, max_width: int, row_height: int, font, color) -> None:
-        """Draw text with wrapping constrained to a specific row height"""
+    def _draw_wrapped_text_in_row(self, draw, text: str, x: int, y: int, max_width: int, row_height: int, font, color):
+        """Draw text with wrapping constrained to row height"""
+        if not font:
+            return
+            
         words = text.split(' ')
         lines = []
         current_line = []
         line_height = 20
-        max_lines = row_height // line_height  # How many lines fit in this row
+        max_lines = row_height // line_height
         
-        # Build lines that fit within max_width
         for word in words:
             test_line = ' '.join(current_line + [word])
             
             try:
-                # Try to get actual text width
-                if hasattr(font, 'getbbox'):
-                    bbox = font.getbbox(test_line)
-                    text_width = bbox[2] - bbox[0]
-                elif hasattr(font, 'getsize'):
-                    text_width = font.getsize(test_line)[0]
-                else:
-                    text_width = len(test_line) * 7
+                bbox = draw.textbbox((0, 0), test_line, font=font)
+                text_width = bbox[2] - bbox[0]
             except:
                 text_width = len(test_line) * 7
             
@@ -539,17 +538,12 @@ class SensorDisplay:
                     lines.append(' '.join(current_line))
                     current_line = [word]
                 else:
-                    # Single word too long, truncate it
+                    # Single word too long
                     truncated_word = word
                     while len(truncated_word) > 3:
                         try:
-                            if hasattr(font, 'getbbox'):
-                                bbox = font.getbbox(truncated_word + "...")
-                                test_width = bbox[2] - bbox[0]
-                            elif hasattr(font, 'getsize'):
-                                test_width = font.getsize(truncated_word + "...")[0]
-                            else:
-                                test_width = len(truncated_word + "...") * 7
+                            bbox = draw.textbbox((0, 0), truncated_word + "...", font=font)
+                            test_width = bbox[2] - bbox[0]
                         except:
                             test_width = len(truncated_word + "...") * 7
                         
@@ -559,110 +553,112 @@ class SensorDisplay:
                     
                     lines.append(truncated_word + "..." if len(truncated_word) < len(word) else word)
         
-        # Add remaining words
         if current_line:
             lines.append(' '.join(current_line))
         
-        # Limit to what fits in the row
+        # Limit to max lines
         if len(lines) > max_lines:
             lines = lines[:max_lines]
-            # Add ellipsis to last line if truncated
             if len(lines) > 0 and max_lines > 0:
                 last_line = lines[-1]
                 if len(last_line) > 3:
                     lines[-1] = last_line[:-3] + "..."
         
-        # Draw each line within the row
+        # Draw lines
         current_y = y
         for line in lines:
-            if current_y + line_height <= y + row_height:  # Ensure we stay within row bounds
+            if current_y + line_height <= y + row_height:
                 draw.text((x, current_y), line, font=font, fill=color)
                 current_y += line_height
             else:
-                break  # Stop if we would exceed row height
-        
-        print(f"[DEBUG] Row text '{text[:15]}...' -> {len(lines)} lines in {row_height}px row")
+                break
 
-    def _draw_wrapped_text(self, draw, text: str, x: int, y: int, max_width: int, font, color) -> int:
-        """Draw text with proper word wrapping using actual font metrics"""
-        words = text.split(' ')
-        lines = []
-        current_line = []
+    def _draw_static_content(self, draw):
+        # Content starts below timestamp
+        LEFT = 10
+        TOP = 30  # Start below timestamp
+        y = TOP
         
-        # Build lines that fit within max_width using actual text measurement
-        for word in words:
-            test_line = ' '.join(current_line + [word])
+        text_color = (0, 0, 0)
+        outline_color = (255, 255, 255)
+        
+        if self.font_big:
+            if self.background_mode == "image":
+                # Draw outline for visibility
+                for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    draw.text((LEFT+dx, y+dy), "Junction", font=self.font_big, fill=outline_color)
+            draw.text((LEFT, y), "Junction", font=self.font_big, fill=text_color)
+            y += 80
             
-            try:
-                # Try to get actual text width (PIL methods vary by version)
-                if hasattr(font, 'getbbox'):
-                    bbox = font.getbbox(test_line)
-                    text_width = bbox[2] - bbox[0]
-                elif hasattr(font, 'getsize'):
-                    text_width = font.getsize(test_line)[0]
-                else:
-                    # Fallback to character estimation
-                    text_width = len(test_line) * 7
-            except:
-                # Fallback to character estimation if font methods fail
-                text_width = len(test_line) * 7
-            
-            if text_width <= max_width:
-                current_line.append(word)
-            else:
-                if current_line:
-                    lines.append(' '.join(current_line))
-                    current_line = [word]
-                else:
-                    # Single word too long, need to truncate
-                    truncated_word = word
-                    while True:
-                        try:
-                            if hasattr(font, 'getbbox'):
-                                bbox = font.getbbox(truncated_word + "...")
-                                test_width = bbox[2] - bbox[0]
-                            elif hasattr(font, 'getsize'):
-                                test_width = font.getsize(truncated_word + "...")[0]
-                            else:
-                                test_width = len(truncated_word) * 7
-                        except:
-                            test_width = len(truncated_word) * 7
-                        
-                        if test_width <= max_width or len(truncated_word) <= 3:
-                            break
-                        truncated_word = truncated_word[:-1]
-                    
-                    lines.append(truncated_word + "..." if len(truncated_word) < len(word) else word)
+            if self.background_mode == "image":
+                for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    draw.text((LEFT+dx, y+dy), "Relay", font=self.font_big, fill=outline_color)
+            draw.text((LEFT, y), "Relay", font=self.font_big, fill=(255, 0, 0))
+            y += 80
         
-        # Add remaining words
-        if current_line:
-            lines.append(' '.join(current_line))
+        if self.font_medium:
+            sub = "E-Paper Display Node"
+            if self.background_mode == "image":
+                for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    draw.text((LEFT+dx, y+dy), sub, font=self.font_medium, fill=(0,0,0))
+            draw.text((LEFT, y), sub, font=self.font_medium, fill=(255, 255, 0))
+            y += 50
         
-        # Limit to 2 lines maximum
-        if len(lines) > 2:
-            lines = lines[:2]
-            # Ensure second line fits with ellipsis if needed
-            if len(lines) == 2:
-                second_line = lines[1]
-                try:
-                    if hasattr(font, 'getbbox'):
-                        bbox = font.getbbox(second_line)
-                        text_width = bbox[2] - bbox[0]
-                    elif hasattr(font, 'getsize'):
-                        text_width = font.getsize(second_line)[0]
-                    else:
-                        text_width = len(second_line) * 7
-                except:
-                    text_width = len(second_line) * 7
-                
-                if text_width > max_width:
-                    # Truncate second line
-                    while len(second_line) > 3:
-                        try:
-                            if hasattr(font, 'getbbox'):
-                                bbox = font.getbbox(second_line[:-3] + "...")
-                                test_width = bbox[2] - bbox[0]
-                            elif hasattr(font, 'getsize'):
-                                test_width = font.getsize(second_line[:-3] + "...")[0]
-                            else:
-                                test_width = len(second_line[:-3] + "
+        draw.line((0, y, self.width, y), fill=(0,0,0), width=2)
+
+    def _draw_sensor_table(self, draw, data: Dict[str, str]):
+        table_width = 280
+        x = self.width - table_width - 10
+        y = 30  # Start below timestamp
+        h = max(100, len(data) * 25 + 50)
+        
+        draw.rectangle([x, y, x + table_width, y + h], fill=(255,255,255), outline=(0,0,0))
+        
+        if self.font_small:
+            draw.text((x+5, y+5), "Live Sensor Data", font=self.font_small, fill=(0,0,0))
+            draw.text((x + table_width - 100, y + 5), datetime.now().strftime("%H:%M"), font=self.font_small, fill=(0,0,0))
+        
+        draw.line((x+5, y+25, x+table_width-5, y+25), fill=(0,0,0))
+        row_y = y + 33
+        
+        if not data:
+            if self.font_small:
+                draw.text((x+8, row_y), "Waiting for data...", font=self.font_small, fill=(128,128,128))
+        else:
+            for name, value in data.items():
+                if row_y + 22 > y + h - 5:
+                    break
+                if self.font_small:
+                    draw.text((x + 8, row_y), f"{name}:", font=self.font_small, fill=(0,0,0))
+                    draw.text((x + table_width - 120, row_y), value, font=self.font_small, fill=(255,0,0))
+                row_y += 22
+
+    def _update_display(self, image):
+        try:
+            if self.epd:
+                self.epd.display(self.epd.getbuffer(image))
+        except Exception as e:
+            print(f"[SensorDisplay] ERROR during display update: {e}")
+
+    def _get_mac_address(self) -> str:
+        try:
+            import uuid
+            return ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0,8*6,8)][::-1])
+        except:
+            return "00:00:00:00:00:00"
+
+    def _get_uptime(self) -> str:
+        try:
+            with open('/proc/uptime', 'r') as f:
+                seconds = float(f.readline().split()[0])
+                return f"{int(seconds // 3600)}h {int((seconds % 3600) // 60)}m"
+        except:
+            return "Unknown"
+
+    def shutdown(self):
+        try:
+            if self.epd:
+                self.epd.sleep()
+            print("[SensorDisplay] Display shutdown complete")
+        except Exception as e:
+            print(f"[SensorDisplay] ERROR during shutdown: {e}")
