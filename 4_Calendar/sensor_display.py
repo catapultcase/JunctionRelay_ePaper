@@ -136,11 +136,11 @@ class SensorDisplay:
             return
         image = self._create_base_canvas()
         draw = ImageDraw.Draw(image)
-        self._draw_static_content(draw)
         
         if self.layout_type == "calendar":
             self._render_calendar_layout(draw, {})
         else:
+            self._draw_static_content(draw)
             self._draw_sensor_table(draw, {})
         
         self._update_display(image)
@@ -267,11 +267,11 @@ class SensorDisplay:
         """Refresh display using appropriate layout renderer"""
         image = self._create_base_canvas()
         draw = ImageDraw.Draw(image)
-        self._draw_static_content(draw)
         
         if self.layout_type == "calendar":
             self._render_calendar_layout(draw, self.sensor_data)
         else:
+            self._draw_static_content(draw)
             self._draw_sensor_table(draw, self.sensor_data)
         
         self._update_display(image)
