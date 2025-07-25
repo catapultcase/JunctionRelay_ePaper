@@ -11,7 +11,7 @@ import tempfile
 import base64
 import io
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple, List
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
@@ -308,7 +308,7 @@ class SensorDisplay:
             return []
 
     def _render_calendar_layout(self, draw, sensor_data: Dict[str, str]):
-        """Render TV Guide style calendar layout - full screen"""
+        """Render TV Guide style calendar layout - full screen with text wrapping"""
         print(f"[DEBUG] Calendar render called with {len(sensor_data)} sensors")
         
         # Count day sensors to determine layout
@@ -320,23 +320,32 @@ class SensorDisplay:
             draw.text((50, 100), "No episode data available", font=self.font_medium, fill=(0, 0, 0))
             return
         
-        # Full screen layout - use entire display
+        # Full screen layout - use entire display with proper spacing
         header_height = 40
         content_start_y = 10
-        column_width = (self.width - 20) // column_count  # 10px margin on each side
+        column_separator_width = 30  # Wider separation between columns
+        
+        # Calculate column width with separator space
+        total_separator_width = (column_count - 1) * column_separator_width
+        available_width = self.width - 20 - total_separator_width  # 10px margins + separator space
+        column_width = available_width // column_count
         
         print(f"[DEBUG] Display: {self.width}x{self.height}, Column width: {column_width}")
         
-        # Column headers mapping
+        # Column headers mapping with dates
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
+        tomorrow = today + timedelta(days=1)
+        
         header_map = {
-            "episodes-yesterday": "Yesterday",
-            "episodes-today": "Today", 
-            "episodes-tomorrow": "Tomorrow"
+            "episodes-yesterday": f"Yesterday ({yesterday.strftime('%-m/%-d/%Y')})",
+            "episodes-today": f"Today ({today.strftime('%-m/%-d/%Y')})", 
+            "episodes-tomorrow": f"Tomorrow ({tomorrow.strftime('%-m/%-d/%Y')})"
         }
         
         # Render each column
         for col_index, sensor_key in enumerate(day_sensor_keys):
-            x_start = 10 + (col_index * column_width)
+            x_start = 10 + (col_index * (column_width + column_separator_width))
             print(f"[DEBUG] Column {col_index} ({sensor_key}) at x={x_start}")
             
             # Draw column header
@@ -345,7 +354,7 @@ class SensorDisplay:
             
             # Draw column separator line (except for first column)
             if col_index > 0:
-                line_x = x_start
+                line_x = x_start - (column_separator_width // 2)
                 draw.line((line_x, content_start_y, line_x, self.height - 10), fill=(128, 128, 128), width=1)
             
             # Draw header underline
@@ -364,9 +373,9 @@ class SensorDisplay:
                     draw.text((x_start + 5, episodes_y), "No episodes", 
                              font=self.font_small, fill=(128, 128, 128))
                 else:
-                    # Render each episode
+                    # Render each episode with text wrapping
                     for episode_idx, episode in enumerate(episodes):
-                        if episodes_y + 22 > self.height - 10:  # Prevent overflow
+                        if episodes_y + 44 > self.height - 10:  # Space for 2 lines + margin
                             print(f"[DEBUG] Stopping at episode {episode_idx} due to overflow at y={episodes_y}")
                             break
                         
@@ -378,29 +387,23 @@ class SensorDisplay:
                         if ' - ' in series:
                             show_name = series.split(' - ')[0]
                             episode_part = series.split(' - ', 1)[1]
-                            # Truncate episode part if too long
-                            if len(episode_part) > 20:
-                                episode_part = episode_part[:17] + "..."
                             display_text = f"{show_name} - {episode_part}"
                         else:
                             display_text = series
                         
                         # Build time and show text
                         if air_time:
-                            time_text = f"{air_time} {display_text}"
+                            full_text = f"{air_time} {display_text}"
                         else:
-                            time_text = display_text
+                            full_text = display_text
                         
-                        # Truncate if too long for column (rough estimation)
-                        max_chars = (column_width - 15) // 7  # Adjusted for font width
-                        if len(time_text) > max_chars:
-                            time_text = time_text[:max_chars-3] + "..."
+                        # Render with text wrapping
+                        wrapped_y = self._draw_wrapped_text(
+                            draw, full_text, x_start + 5, episodes_y, 
+                            column_width - 15, self.font_small, (0, 0, 0)
+                        )
                         
-                        print(f"[DEBUG] Drawing at ({x_start + 5}, {episodes_y}): {time_text[:30]}...")
-                        draw.text((x_start + 5, episodes_y), time_text, 
-                                 font=self.font_small, fill=(0, 0, 0))
-                        
-                        episodes_y += 22  # Line spacing
+                        episodes_y = wrapped_y + 4  # Small gap between episodes
             else:
                 # Sensor not found
                 print(f"[DEBUG] Sensor {sensor_key} not found in data")
@@ -408,6 +411,53 @@ class SensorDisplay:
                          font=self.font_small, fill=(128, 128, 128))
         
         print("[DEBUG] Calendar rendering complete")
+
+    def _draw_wrapped_text(self, draw, text: str, x: int, y: int, max_width: int, font, color) -> int:
+        """Draw text with word wrapping, returns the final y position"""
+        words = text.split(' ')
+        lines = []
+        current_line = []
+        
+        # Build lines that fit within max_width
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            
+            # Get text width (rough estimation since getsize is deprecated)
+            text_width = len(test_line) * 7  # Approximate character width for font_small
+            
+            if text_width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                else:
+                    # Single word too long, truncate it
+                    max_chars = max_width // 7
+                    truncated_word = word[:max_chars-3] + "..." if len(word) > max_chars else word
+                    lines.append(truncated_word)
+        
+        # Add remaining words
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        # Limit to 2 lines maximum
+        if len(lines) > 2:
+            lines = lines[:2]
+            # Add ellipsis to second line if truncated
+            if len(lines[1]) > 3:
+                lines[1] = lines[1][:-3] + "..."
+        
+        # Draw each line
+        current_y = y
+        line_height = 20
+        
+        for line in lines:
+            draw.text((x, current_y), line, font=font, fill=color)
+            current_y += line_height
+        
+        print(f"[DEBUG] Wrapped text '{text[:30]}...' into {len(lines)} lines")
+        return current_y
 
     def _draw_static_content(self, draw):
         LEFT = 10
