@@ -265,6 +265,8 @@ class SensorDisplay:
 
     def _refresh_display(self):
         """Refresh display using appropriate layout renderer"""
+        print(f"[DEBUG] _refresh_display called, layout_type='{self.layout_type}'")
+        
         image = self._create_base_canvas()
         draw = ImageDraw.Draw(image)
         
@@ -293,43 +295,37 @@ class SensorDisplay:
     def _parse_episode_json(self, json_string: str) -> List[Dict[str, Any]]:
         """Parse episode JSON data and return list of episodes"""
         try:
-            print(f"[DEBUG] Raw input: {json_string[:100]}...")
-            
             # Remove the unit suffix if present (e.g., "Episodes JSON")
             if json_string.endswith("Episodes JSON"):
                 json_string = json_string[:-13].strip()
-                print(f"[DEBUG] After removing unit suffix: {json_string[:100]}...")
             
             episodes = json.loads(json_string)
-            print(f"[DEBUG] Parsed JSON type: {type(episodes)}")
-            
             if isinstance(episodes, list):
-                print(f"[DEBUG] Found {len(episodes)} episodes")
-                for i, ep in enumerate(episodes[:2]):  # Show first 2
-                    print(f"[DEBUG] Episode {i}: {ep.get('series', 'NO_SERIES')} at {ep.get('airTime', 'NO_TIME')}")
                 return episodes
-            else:
-                print(f"[DEBUG] JSON is not a list: {type(episodes)}")
             return []
         except (json.JSONDecodeError, TypeError) as e:
             print(f"[SensorDisplay] Error parsing episode JSON: {e}")
-            print(f"[DEBUG] Failed string: {json_string[:200]}...")
             return []
 
     def _render_calendar_layout(self, draw, sensor_data: Dict[str, str]):
-        """Render TV Guide style calendar layout"""
+        """Render TV Guide style calendar layout - full screen"""
+        print(f"[DEBUG] Calendar render called with {len(sensor_data)} sensors")
+        
         # Count day sensors to determine layout
         column_count, day_sensor_keys = self._count_day_sensors(sensor_data)
+        print(f"[DEBUG] Column count: {column_count}, Keys: {day_sensor_keys}")
         
         if column_count == 0:
             # No day sensors found, show message
-            draw.text((20, 200), "No episode data available", font=self.font_medium, fill=(128, 128, 128))
+            draw.text((50, 100), "No episode data available", font=self.font_medium, fill=(0, 0, 0))
             return
         
-        # Calculate layout dimensions
-        content_start_y = 200  # Start below static content
-        content_height = self.height - content_start_y - 20
-        column_width = (self.width - 40) // column_count
+        # Full screen layout - use entire display
+        header_height = 40
+        content_start_y = 10
+        column_width = (self.width - 20) // column_count  # 10px margin on each side
+        
+        print(f"[DEBUG] Display: {self.width}x{self.height}, Column width: {column_width}")
         
         # Column headers mapping
         header_map = {
@@ -340,26 +336,28 @@ class SensorDisplay:
         
         # Render each column
         for col_index, sensor_key in enumerate(day_sensor_keys):
-            x_start = 20 + (col_index * column_width)
+            x_start = 10 + (col_index * column_width)
+            print(f"[DEBUG] Column {col_index} ({sensor_key}) at x={x_start}")
             
             # Draw column header
             header_text = header_map.get(sensor_key, sensor_key)
             draw.text((x_start + 5, content_start_y), header_text, font=self.font_medium, fill=(0, 0, 0))
             
-            # Draw column separator line
+            # Draw column separator line (except for first column)
             if col_index > 0:
-                line_x = x_start - 1
-                draw.line((line_x, content_start_y, line_x, self.height - 20), fill=(128, 128, 128), width=1)
+                line_x = x_start
+                draw.line((line_x, content_start_y, line_x, self.height - 10), fill=(128, 128, 128), width=1)
             
             # Draw header underline
             draw.line((x_start + 5, content_start_y + 35, x_start + column_width - 10, content_start_y + 35), 
                      fill=(0, 0, 0), width=1)
             
             # Parse and render episodes for this day
-            episodes_y = content_start_y + 45
+            episodes_y = content_start_y + header_height + 5
             
             if sensor_key in sensor_data:
                 episodes = self._parse_episode_json(sensor_data[sensor_key])
+                print(f"[DEBUG] Rendering {len(episodes)} episodes for {sensor_key}")
                 
                 if not episodes:
                     # Empty day
@@ -367,8 +365,9 @@ class SensorDisplay:
                              font=self.font_small, fill=(128, 128, 128))
                 else:
                     # Render each episode
-                    for episode in episodes:
-                        if episodes_y + 20 > self.height - 25:  # Prevent overflow
+                    for episode_idx, episode in enumerate(episodes):
+                        if episodes_y + 22 > self.height - 10:  # Prevent overflow
+                            print(f"[DEBUG] Stopping at episode {episode_idx} due to overflow at y={episodes_y}")
                             break
                         
                         # Extract episode info
@@ -380,35 +379,35 @@ class SensorDisplay:
                             show_name = series.split(' - ')[0]
                             episode_part = series.split(' - ', 1)[1]
                             # Truncate episode part if too long
-                            if len(episode_part) > 15:
-                                episode_part = episode_part[:12] + "..."
+                            if len(episode_part) > 20:
+                                episode_part = episode_part[:17] + "..."
                             display_text = f"{show_name} - {episode_part}"
                         else:
                             display_text = series
                         
-                        # Truncate if too long for column
-                        max_chars = (column_width - 15) // 6  # Rough character width estimation
-                        if len(display_text) > max_chars:
-                            display_text = display_text[:max_chars-3] + "..."
-                        
-                        # Draw time and show
+                        # Build time and show text
                         if air_time:
                             time_text = f"{air_time} {display_text}"
                         else:
                             time_text = display_text
                         
+                        # Truncate if too long for column (rough estimation)
+                        max_chars = (column_width - 15) // 7  # Adjusted for font width
+                        if len(time_text) > max_chars:
+                            time_text = time_text[:max_chars-3] + "..."
+                        
+                        print(f"[DEBUG] Drawing at ({x_start + 5}, {episodes_y}): {time_text[:30]}...")
                         draw.text((x_start + 5, episodes_y), time_text, 
                                  font=self.font_small, fill=(0, 0, 0))
                         
-                        episodes_y += 18  # Line spacing
+                        episodes_y += 22  # Line spacing
             else:
                 # Sensor not found
+                print(f"[DEBUG] Sensor {sensor_key} not found in data")
                 draw.text((x_start + 5, episodes_y), "No data", 
                          font=self.font_small, fill=(128, 128, 128))
         
-        # Draw bottom border
-        draw.line((20, self.height - 20, self.width - 20, self.height - 20), 
-                 fill=(0, 0, 0), width=1)
+        print("[DEBUG] Calendar rendering complete")
 
     def _draw_static_content(self, draw):
         LEFT = 10
