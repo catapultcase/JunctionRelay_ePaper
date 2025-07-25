@@ -308,7 +308,7 @@ class SensorDisplay:
             return []
 
     def _render_calendar_layout(self, draw, sensor_data: Dict[str, str]):
-        """Render TV Guide style calendar layout - full screen with text wrapping"""
+        """Render TV Guide style calendar layout - proper 2-column table per day"""
         print(f"[DEBUG] Calendar render called with {len(sensor_data)} sensors")
         
         # Count day sensors to determine layout
@@ -321,16 +321,20 @@ class SensorDisplay:
             return
         
         # Full screen layout - use entire display with proper spacing
-        header_height = 40
+        header_height = 45
         content_start_y = 10
-        column_separator_width = 30  # Wider separation between columns
+        column_separator_width = 30  # Wider separation between day columns
         
-        # Calculate column width with separator space
+        # Calculate day column width with separator space
         total_separator_width = (column_count - 1) * column_separator_width
         available_width = self.width - 20 - total_separator_width  # 10px margins + separator space
-        column_width = available_width // column_count
+        day_column_width = available_width // column_count
         
-        print(f"[DEBUG] Display: {self.width}x{self.height}, Column width: {column_width}")
+        # Within each day column: TIME | TITLE structure
+        time_column_width = 50   # Fixed width for time
+        title_column_width = day_column_width - time_column_width - 10  # Remaining for titles
+        
+        print(f"[DEBUG] Display: {self.width}x{self.height}, Day column: {day_column_width}, Time: {time_column_width}, Title: {title_column_width}")
         
         # Column headers mapping with date only for Today
         today = datetime.now()
@@ -343,26 +347,39 @@ class SensorDisplay:
             "episodes-tomorrow": "Tomorrow"
         }
         
-        # Render each column
+        # Render each day column
         for col_index, sensor_key in enumerate(day_sensor_keys):
-            x_start = 10 + (col_index * (column_width + column_separator_width))
-            print(f"[DEBUG] Column {col_index} ({sensor_key}) at x={x_start}")
+            day_x_start = 10 + (col_index * (day_column_width + column_separator_width))
+            print(f"[DEBUG] Day column {col_index} ({sensor_key}) at x={day_x_start}")
             
-            # Draw column header
+            # Draw day header
             header_text = header_map.get(sensor_key, sensor_key)
-            draw.text((x_start + 5, content_start_y), header_text, font=self.font_medium, fill=(0, 0, 0))
+            draw.text((day_x_start + 5, content_start_y), header_text, font=self.font_medium, fill=(0, 0, 0))
             
-            # Draw column separator line (except for first column)
+            # Draw day column separator line (except for first column)
             if col_index > 0:
-                line_x = x_start - (column_separator_width // 2)
+                line_x = day_x_start - (column_separator_width // 2)
                 draw.line((line_x, content_start_y, line_x, self.height - 10), fill=(128, 128, 128), width=1)
             
             # Draw header underline
-            draw.line((x_start + 5, content_start_y + 35, x_start + column_width - 10, content_start_y + 35), 
+            draw.line((day_x_start + 5, content_start_y + 35, day_x_start + day_column_width - 10, content_start_y + 35), 
                      fill=(0, 0, 0), width=1)
             
+            # Draw table headers: TIME | TITLE
+            table_header_y = content_start_y + header_height
+            time_x = day_x_start + 5
+            title_x = day_x_start + 5 + time_column_width + 5  # 5px gap between columns
+            
+            draw.text((time_x, table_header_y), "TIME", font=self.font_small, fill=(100, 100, 100))
+            draw.text((title_x, table_header_y), "TITLE", font=self.font_small, fill=(100, 100, 100))
+            
+            # Draw table header underline
+            draw.line((day_x_start + 5, table_header_y + 18, day_x_start + day_column_width - 10, table_header_y + 18), 
+                     fill=(150, 150, 150), width=1)
+            
             # Parse and render episodes for this day
-            episodes_y = content_start_y + header_height + 5
+            episodes_start_y = table_header_y + 25
+            episodes_y = episodes_start_y
             
             if sensor_key in sensor_data:
                 episodes = self._parse_episode_json(sensor_data[sensor_key])
@@ -370,12 +387,14 @@ class SensorDisplay:
                 
                 if not episodes:
                     # Empty day
-                    draw.text((x_start + 5, episodes_y), "No episodes", 
+                    draw.text((title_x, episodes_y), "No episodes", 
                              font=self.font_small, fill=(128, 128, 128))
                 else:
-                    # Render each episode with text wrapping
+                    # Render each episode in table rows
                     for episode_idx, episode in enumerate(episodes):
-                        if episodes_y + 44 > self.height - 10:  # Space for 2 lines + margin
+                        row_height = 44  # Fixed height per episode row (for 2 lines max)
+                        
+                        if episodes_y + row_height > self.height - 10:  # Prevent overflow
                             print(f"[DEBUG] Stopping at episode {episode_idx} due to overflow at y={episodes_y}")
                             break
                         
@@ -391,26 +410,99 @@ class SensorDisplay:
                         else:
                             display_text = series
                         
-                        # Build time and show text
+                        # Render TIME column (fixed position, single line)
                         if air_time:
-                            full_text = f"{air_time} {display_text}"
-                        else:
-                            full_text = display_text
+                            draw.text((time_x, episodes_y), air_time, font=self.font_small, fill=(0, 0, 0))
                         
-                        # Render with text wrapping
-                        wrapped_y = self._draw_wrapped_text(
-                            draw, full_text, x_start + 5, episodes_y, 
-                            column_width - 15, self.font_small, (0, 0, 0)
+                        # Render TITLE column with wrapping constrained to this row
+                        self._draw_wrapped_text_in_row(
+                            draw, display_text, title_x, episodes_y, 
+                            title_column_width, row_height, self.font_small, (0, 0, 0)
                         )
                         
-                        episodes_y = wrapped_y + 4  # Small gap between episodes
+                        episodes_y += row_height  # Move to next row
             else:
                 # Sensor not found
                 print(f"[DEBUG] Sensor {sensor_key} not found in data")
-                draw.text((x_start + 5, episodes_y), "No data", 
+                draw.text((title_x, episodes_y), "No data", 
                          font=self.font_small, fill=(128, 128, 128))
         
         print("[DEBUG] Calendar rendering complete")
+
+    def _draw_wrapped_text_in_row(self, draw, text: str, x: int, y: int, max_width: int, row_height: int, font, color) -> None:
+        """Draw text with wrapping constrained to a specific row height"""
+        words = text.split(' ')
+        lines = []
+        current_line = []
+        line_height = 20
+        max_lines = row_height // line_height  # How many lines fit in this row
+        
+        # Build lines that fit within max_width
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            
+            try:
+                # Try to get actual text width
+                if hasattr(font, 'getbbox'):
+                    bbox = font.getbbox(test_line)
+                    text_width = bbox[2] - bbox[0]
+                elif hasattr(font, 'getsize'):
+                    text_width = font.getsize(test_line)[0]
+                else:
+                    text_width = len(test_line) * 7
+            except:
+                text_width = len(test_line) * 7
+            
+            if text_width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                else:
+                    # Single word too long, truncate it
+                    truncated_word = word
+                    while len(truncated_word) > 3:
+                        try:
+                            if hasattr(font, 'getbbox'):
+                                bbox = font.getbbox(truncated_word + "...")
+                                test_width = bbox[2] - bbox[0]
+                            elif hasattr(font, 'getsize'):
+                                test_width = font.getsize(truncated_word + "...")[0]
+                            else:
+                                test_width = len(truncated_word + "...") * 7
+                        except:
+                            test_width = len(truncated_word + "...") * 7
+                        
+                        if test_width <= max_width:
+                            break
+                        truncated_word = truncated_word[:-1]
+                    
+                    lines.append(truncated_word + "..." if len(truncated_word) < len(word) else word)
+        
+        # Add remaining words
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        # Limit to what fits in the row
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            # Add ellipsis to last line if truncated
+            if len(lines) > 0 and max_lines > 0:
+                last_line = lines[-1]
+                if len(last_line) > 3:
+                    lines[-1] = last_line[:-3] + "..."
+        
+        # Draw each line within the row
+        current_y = y
+        for line in lines:
+            if current_y + line_height <= y + row_height:  # Ensure we stay within row bounds
+                draw.text((x, current_y), line, font=font, fill=color)
+                current_y += line_height
+            else:
+                break  # Stop if we would exceed row height
+        
+        print(f"[DEBUG] Row text '{text[:15]}...' -> {len(lines)} lines in {row_height}px row")
 
     def _draw_wrapped_text(self, draw, text: str, x: int, y: int, max_width: int, font, color) -> int:
         """Draw text with proper word wrapping using actual font metrics"""
