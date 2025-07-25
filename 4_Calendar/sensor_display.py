@@ -398,9 +398,9 @@ class SensorDisplay:
                         else:
                             display_text = series
                         
-                        # Calculate positions with padding
+                        # Calculate positions with more padding between columns
                         time_x = day_x_start + 8  # 3px extra padding from left edge
-                        title_x = day_x_start + 8 + time_column_width + 8  # 8px gap between columns
+                        title_x = day_x_start + 8 + time_column_width + 15  # 15px gap between columns (was 8px)
                         
                         # Render TIME column (fixed position, single line)
                         if air_time:
@@ -409,7 +409,7 @@ class SensorDisplay:
                         # Render TITLE column with wrapping constrained to this row
                         self._draw_wrapped_text_in_row(
                             draw, display_text, title_x, episodes_y + 2, 
-                            title_column_width - 16, row_height - 4, self.font_small, (0, 0, 0)  # -16px for padding, -4px height for top/bottom padding
+                            title_column_width - 23, row_height - 4, self.font_small, (0, 0, 0)  # -23px for padding (was -16px)
                         )
                         
                         episodes_y += row_height  # Move to next row
