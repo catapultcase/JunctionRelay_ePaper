@@ -60,6 +60,11 @@ cp -r e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd ./
 
 ```bash
 sudo -E env "GPIOZERO_PIN_FACTORY=lgpio" python main.py
+
+OR
+
+nohup sudo -E env "GPIOZERO_PIN_FACTORY=lgpio" python main.py > output.log 2>&1 &
+
 ```
 
 > This starts the ePaper UI, initializes the display, and launches the web server at http://<your-pi-ip>:80
