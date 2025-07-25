@@ -332,15 +332,15 @@ class SensorDisplay:
         
         print(f"[DEBUG] Display: {self.width}x{self.height}, Column width: {column_width}")
         
-        # Column headers mapping with dates
+        # Column headers mapping with date only for Today
         today = datetime.now()
         yesterday = today - timedelta(days=1)
         tomorrow = today + timedelta(days=1)
         
         header_map = {
-            "episodes-yesterday": f"Yesterday ({yesterday.strftime('%-m/%-d/%Y')})",
+            "episodes-yesterday": "Yesterday",
             "episodes-today": f"Today ({today.strftime('%-m/%-d/%Y')})", 
-            "episodes-tomorrow": f"Tomorrow ({tomorrow.strftime('%-m/%-d/%Y')})"
+            "episodes-tomorrow": "Tomorrow"
         }
         
         # Render each column
@@ -412,18 +412,29 @@ class SensorDisplay:
         
         print("[DEBUG] Calendar rendering complete")
 
-    def _draw_wrapped_text(self, draw, text: str, x: int, y: int, max_width: int, font, color) -> int:
-        """Draw text with word wrapping, returns the final y position"""
+    def _draw_wrapped_text_fixed(self, draw, text: str, x: int, y: int, max_width: int, font, color) -> int:
+        """Draw text with proper word wrapping using actual font metrics"""
         words = text.split(' ')
         lines = []
         current_line = []
         
-        # Build lines that fit within max_width
+        # Build lines that fit within max_width using actual text measurement
         for word in words:
             test_line = ' '.join(current_line + [word])
             
-            # Get text width (rough estimation since getsize is deprecated)
-            text_width = len(test_line) * 7  # Approximate character width for font_small
+            try:
+                # Try to get actual text width (PIL methods vary by version)
+                if hasattr(font, 'getbbox'):
+                    bbox = font.getbbox(test_line)
+                    text_width = bbox[2] - bbox[0]
+                elif hasattr(font, 'getsize'):
+                    text_width = font.getsize(test_line)[0]
+                else:
+                    # Fallback to character estimation
+                    text_width = len(test_line) * 7
+            except:
+                # Fallback to character estimation if font methods fail
+                text_width = len(test_line) * 7
             
             if text_width <= max_width:
                 current_line.append(word)
@@ -432,10 +443,25 @@ class SensorDisplay:
                     lines.append(' '.join(current_line))
                     current_line = [word]
                 else:
-                    # Single word too long, truncate it
-                    max_chars = max_width // 7
-                    truncated_word = word[:max_chars-3] + "..." if len(word) > max_chars else word
-                    lines.append(truncated_word)
+                    # Single word too long, need to truncate
+                    truncated_word = word
+                    while True:
+                        try:
+                            if hasattr(font, 'getbbox'):
+                                bbox = font.getbbox(truncated_word + "...")
+                                test_width = bbox[2] - bbox[0]
+                            elif hasattr(font, 'getsize'):
+                                test_width = font.getsize(truncated_word + "...")[0]
+                            else:
+                                test_width = len(truncated_word) * 7
+                        except:
+                            test_width = len(truncated_word) * 7
+                        
+                        if test_width <= max_width or len(truncated_word) <= 3:
+                            break
+                        truncated_word = truncated_word[:-1]
+                    
+                    lines.append(truncated_word + "..." if len(truncated_word) < len(word) else word)
         
         # Add remaining words
         if current_line:
@@ -444,9 +470,38 @@ class SensorDisplay:
         # Limit to 2 lines maximum
         if len(lines) > 2:
             lines = lines[:2]
-            # Add ellipsis to second line if truncated
-            if len(lines[1]) > 3:
-                lines[1] = lines[1][:-3] + "..."
+            # Ensure second line fits with ellipsis if needed
+            if len(lines) == 2:
+                second_line = lines[1]
+                try:
+                    if hasattr(font, 'getbbox'):
+                        bbox = font.getbbox(second_line)
+                        text_width = bbox[2] - bbox[0]
+                    elif hasattr(font, 'getsize'):
+                        text_width = font.getsize(second_line)[0]
+                    else:
+                        text_width = len(second_line) * 7
+                except:
+                    text_width = len(second_line) * 7
+                
+                if text_width > max_width:
+                    # Truncate second line
+                    while len(second_line) > 3:
+                        try:
+                            if hasattr(font, 'getbbox'):
+                                bbox = font.getbbox(second_line[:-3] + "...")
+                                test_width = bbox[2] - bbox[0]
+                            elif hasattr(font, 'getsize'):
+                                test_width = font.getsize(second_line[:-3] + "...")[0]
+                            else:
+                                test_width = len(second_line[:-3] + "...") * 7
+                        except:
+                            test_width = len(second_line[:-3] + "...") * 7
+                        
+                        if test_width <= max_width:
+                            break
+                        second_line = second_line[:-1]
+                    lines[1] = second_line[:-3] + "..." if len(second_line) > 3 else second_line
         
         # Draw each line
         current_y = y
@@ -456,7 +511,7 @@ class SensorDisplay:
             draw.text((x, current_y), line, font=font, fill=color)
             current_y += line_height
         
-        print(f"[DEBUG] Wrapped text '{text[:30]}...' into {len(lines)} lines")
+        print(f"[DEBUG] Wrapped text '{text[:20]}...' into {len(lines)} lines, width={max_width}")
         return current_y
 
     def _draw_static_content(self, draw):
