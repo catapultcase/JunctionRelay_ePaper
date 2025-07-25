@@ -293,16 +293,27 @@ class SensorDisplay:
     def _parse_episode_json(self, json_string: str) -> List[Dict[str, Any]]:
         """Parse episode JSON data and return list of episodes"""
         try:
+            print(f"[DEBUG] Raw input: {json_string[:100]}...")
+            
             # Remove the unit suffix if present (e.g., "Episodes JSON")
             if json_string.endswith("Episodes JSON"):
                 json_string = json_string[:-13].strip()
+                print(f"[DEBUG] After removing unit suffix: {json_string[:100]}...")
             
             episodes = json.loads(json_string)
+            print(f"[DEBUG] Parsed JSON type: {type(episodes)}")
+            
             if isinstance(episodes, list):
+                print(f"[DEBUG] Found {len(episodes)} episodes")
+                for i, ep in enumerate(episodes[:2]):  # Show first 2
+                    print(f"[DEBUG] Episode {i}: {ep.get('series', 'NO_SERIES')} at {ep.get('airTime', 'NO_TIME')}")
                 return episodes
+            else:
+                print(f"[DEBUG] JSON is not a list: {type(episodes)}")
             return []
         except (json.JSONDecodeError, TypeError) as e:
             print(f"[SensorDisplay] Error parsing episode JSON: {e}")
+            print(f"[DEBUG] Failed string: {json_string[:200]}...")
             return []
 
     def _render_calendar_layout(self, draw, sensor_data: Dict[str, str]):
