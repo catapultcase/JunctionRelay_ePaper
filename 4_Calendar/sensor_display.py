@@ -3,6 +3,7 @@ Sensor Display - Manages e-paper display updates
 Handles real sensor data from Junction Relay protocol
 Enhanced with background image support via config payloads
 Added calendar layout support for TV Guide-style episode displays
+Enhanced with timezone conversion and last updated display
 """
 
 import os
@@ -40,6 +41,7 @@ class SensorDisplay:
         self.font_big = None
         self.font_medium = None
         self.font_small = None
+        self.font_tiny = None  # For last updated text
 
     def initialize(self):
         try:
@@ -59,11 +61,50 @@ class SensorDisplay:
             self.font_big = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 72)
             self.font_medium = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 32)
             self.font_small = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 20)
+            self.font_tiny = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 14)
         except Exception as e:
             print(f"[SensorDisplay] WARNING: Failed to load fonts: {e}")
             self.font_big = ImageFont.load_default()
             self.font_medium = ImageFont.load_default()
             self.font_small = ImageFont.load_default()
+            self.font_tiny = ImageFont.load_default()
+
+    def _parse_utc_datetime(self, datetime_str: str) -> Optional[datetime]:
+        """Parse UTC datetime string and convert to local timezone"""
+        if not datetime_str:
+            return None
+        
+        try:
+            # Handle both formats: "2025-08-08T01:00:00Z" and "01:00"
+            if 'T' in datetime_str and datetime_str.endswith('Z'):
+                # Full datetime with Z suffix (UTC)
+                utc_dt = datetime.strptime(datetime_str, "%Y-%m-%dT%H:%M:%SZ")
+                # Convert UTC to local time
+                utc_timestamp = utc_dt.timestamp()
+                local_dt = datetime.fromtimestamp(utc_timestamp)
+                return local_dt
+            elif ':' in datetime_str and len(datetime_str) == 5:
+                # Just time format "HH:MM" - assume it's already UTC and convert to local
+                # We need a date to work with, so use today
+                today = datetime.now().date()
+                utc_time = datetime.strptime(f"{today} {datetime_str}", "%Y-%m-%d %H:%M")
+                # Convert assuming this time is in UTC
+                utc_timestamp = utc_time.replace(tzinfo=None).timestamp() - time.timezone
+                local_dt = datetime.fromtimestamp(utc_timestamp)
+                return local_dt
+            else:
+                print(f"[SensorDisplay] Unrecognized datetime format: {datetime_str}")
+                return None
+        except Exception as e:
+            print(f"[SensorDisplay] Error parsing datetime '{datetime_str}': {e}")
+            return None
+
+    def _format_local_time(self, datetime_str: str) -> str:
+        """Convert UTC time string to local time string"""
+        local_dt = self._parse_utc_datetime(datetime_str)
+        if local_dt:
+            return local_dt.strftime("%H:%M")
+        return datetime_str  # Fallback to original if parsing fails
 
     def set_background_image(self, image_data: bytes, opacity: float = 1.0):
         """Set background image from binary data"""
@@ -137,6 +178,9 @@ class SensorDisplay:
         image = self._create_base_canvas()
         draw = ImageDraw.Draw(image)
         
+        # Draw last updated in top right corner
+        self._draw_last_updated(draw)
+        
         if self.layout_type == "calendar":
             self._render_calendar_layout(draw, {})
         else:
@@ -145,6 +189,32 @@ class SensorDisplay:
         
         self._update_display(image)
         print("[SensorDisplay] Startup screen displayed")
+
+    def _draw_last_updated(self, draw):
+        """Draw last updated timestamp in top right corner"""
+        if self.last_update:
+            update_text = f"Last Updated: {self.last_update.strftime('%H:%M:%S')}"
+        else:
+            update_text = "Last Updated: Never"
+        
+        # Calculate text width to right-align
+        try:
+            if hasattr(self.font_tiny, 'getbbox'):
+                bbox = self.font_tiny.getbbox(update_text)
+                text_width = bbox[2] - bbox[0]
+            elif hasattr(self.font_tiny, 'getsize'):
+                text_width = self.font_tiny.getsize(update_text)[0]
+            else:
+                text_width = len(update_text) * 7
+        except:
+            text_width = len(update_text) * 7
+        
+        # Position in top right corner with small margin
+        x = self.width - text_width - 5
+        y = 3
+        
+        # Draw with subtle color
+        draw.text((x, y), update_text, font=self.font_tiny, fill=(128, 128, 128))
 
     def _create_base_canvas(self) -> Image.Image:
         """Create the base canvas with background"""
@@ -220,6 +290,10 @@ class SensorDisplay:
             return
         image = self._create_base_canvas()
         draw = ImageDraw.Draw(image)
+        
+        # Draw last updated in top right corner
+        self._draw_last_updated(draw)
+        
         y = 20
         draw.text((20, y), "System Status", font=self.font_big, fill=(0, 0, 0))
         y += 80
@@ -269,6 +343,9 @@ class SensorDisplay:
         
         image = self._create_base_canvas()
         draw = ImageDraw.Draw(image)
+        
+        # Always draw last updated in top right corner
+        self._draw_last_updated(draw)
         
         if self.layout_type == "calendar":
             self._render_calendar_layout(draw, self.sensor_data)
@@ -321,8 +398,9 @@ class SensorDisplay:
             return
         
         # Full screen layout - use entire display with proper spacing
+        # Account for last updated text at top (reserve 20px)
         header_height = 45
-        content_start_y = 10
+        content_start_y = 25  # Start below the "Last Updated" text
         column_separator_width = 30  # Wider separation between day columns
         
         # Calculate day column width with separator space
@@ -375,6 +453,7 @@ class SensorDisplay:
                 
                 if not episodes:
                     # Empty day
+                    title_x = day_x_start + 8 + time_column_width + 15
                     draw.text((title_x, episodes_y), "No episodes", 
                              font=self.font_small, fill=(128, 128, 128))
                 else:
@@ -390,6 +469,13 @@ class SensorDisplay:
                         series = episode.get('series', 'Unknown Show')
                         air_time = episode.get('airTime', '')
                         
+                        # Convert UTC time to local time
+                        if air_time:
+                            local_time = self._format_local_time(air_time)
+                            print(f"[DEBUG] Converted time {air_time} -> {local_time}")
+                        else:
+                            local_time = air_time
+                        
                         # Clean up series name (remove episode details after " - ")
                         if ' - ' in series:
                             show_name = series.split(' - ')[0]
@@ -402,9 +488,9 @@ class SensorDisplay:
                         time_x = day_x_start + 8  # 3px extra padding from left edge
                         title_x = day_x_start + 8 + time_column_width + 15  # 15px gap between columns (was 8px)
                         
-                        # Render TIME column (fixed position, single line)
-                        if air_time:
-                            draw.text((time_x, episodes_y + 2), air_time, font=self.font_small, fill=(0, 0, 0))  # +2px top padding
+                        # Render TIME column (fixed position, single line) - use local time
+                        if local_time:
+                            draw.text((time_x, episodes_y + 2), local_time, font=self.font_small, fill=(0, 0, 0))  # +2px top padding
                         
                         # Render TITLE column with wrapping constrained to this row
                         self._draw_wrapped_text_in_row(
@@ -416,6 +502,7 @@ class SensorDisplay:
             else:
                 # Sensor not found
                 print(f"[DEBUG] Sensor {sensor_key} not found in data")
+                title_x = day_x_start + 8 + time_column_width + 15
                 draw.text((title_x, episodes_y), "No data", 
                          font=self.font_small, fill=(128, 128, 128))
         
@@ -578,101 +665,4 @@ class SensorDisplay:
                             elif hasattr(font, 'getsize'):
                                 test_width = font.getsize(second_line[:-3] + "...")[0]
                             else:
-                                test_width = len(second_line[:-3] + "...") * 7
-                        except:
-                            test_width = len(second_line[:-3] + "...") * 7
-                        
-                        if test_width <= max_width:
-                            break
-                        second_line = second_line[:-1]
-                    lines[1] = second_line[:-3] + "..." if len(second_line) > 3 else second_line
-        
-        # Draw each line
-        current_y = y
-        line_height = 20
-        
-        for line in lines:
-            draw.text((x, current_y), line, font=font, fill=color)
-            current_y += line_height
-        
-        print(f"[DEBUG] Wrapped text '{text[:20]}...' into {len(lines)} lines, width={max_width}")
-        return current_y
-
-    def _draw_static_content(self, draw):
-        LEFT = 10
-        TOP = 8
-        y = TOP
-        
-        # Add text outline for better visibility on background images
-        text_color = (0, 0, 0)
-        outline_color = (255, 255, 255)
-        
-        if self.background_mode == "image":
-            # Draw outline for better visibility
-            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
-                draw.text((LEFT+dx, y+dy), "Junction", font=self.font_big, fill=outline_color)
-        draw.text((LEFT, y), "Junction", font=self.font_big, fill=text_color)
-        
-        y += 80
-        if self.background_mode == "image":
-            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
-                draw.text((LEFT+dx, y+dy), "Relay", font=self.font_big, fill=outline_color)
-        draw.text((LEFT, y), "Relay", font=self.font_big, fill=(255, 0, 0))
-        
-        y += 80
-        sub = "E-Paper Display Node"
-        if self.background_mode == "image":
-            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
-                draw.text((LEFT+dx, y+dy), sub, font=self.font_medium, fill=(0,0,0))
-        draw.text((LEFT, y), sub, font=self.font_medium, fill=(255, 255, 0))
-        
-        y += 50
-        draw.line((0, y, self.width, y), fill=(0,0,0), width=2)
-
-    def _draw_sensor_table(self, draw, data: Dict[str, str]):
-        table_width = 280
-        x = self.width - table_width - 10
-        y = 10
-        h = max(100, len(data) * 25 + 50)
-        draw.rectangle([x, y, x + table_width, y + h], fill=(255,255,255), outline=(0,0,0))
-        draw.text((x+5, y+5), "Live Sensor Data", font=self.font_small, fill=(0,0,0))
-        draw.text((x + table_width - 100, y + 5), datetime.now().strftime("%H:%M"), font=self.font_small, fill=(0,0,0))
-        draw.line((x+5, y+25, x+table_width-5, y+25), fill=(0,0,0))
-        row_y = y + 33
-        if not data:
-            draw.text((x+8, row_y), "Waiting for data...", font=self.font_small, fill=(128,128,128))
-        else:
-            for name, value in data.items():
-                if row_y + 22 > y + h - 5:
-                    break
-                draw.text((x + 8, row_y), f"{name}:", font=self.font_small, fill=(0,0,0))
-                draw.text((x + table_width - 120, row_y), value, font=self.font_small, fill=(255,0,0))
-                row_y += 22
-
-    def _update_display(self, image):
-        try:
-            self.epd.display(self.epd.getbuffer(image))
-        except Exception as e:
-            print(f"[SensorDisplay] ERROR during display update: {e}")
-
-    def _get_mac_address(self) -> str:
-        try:
-            import uuid
-            return ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0,8*6,8)][::-1])
-        except:
-            return "00:00:00:00:00:00"
-
-    def _get_uptime(self) -> str:
-        try:
-            with open('/proc/uptime', 'r') as f:
-                seconds = float(f.readline().split()[0])
-                return f"{int(seconds // 3600)}h {int((seconds % 3600) // 60)}m"
-        except:
-            return "Unknown"
-
-    def shutdown(self):
-        try:
-            self.epd.sleep()
-            print("[SensorDisplay] Display shutdown complete")
-        except Exception as e:
-            print(f"[SensorDisplay] ERROR during shutdown: {e}")
+                                test_width = len(second_line[:-3] + "
