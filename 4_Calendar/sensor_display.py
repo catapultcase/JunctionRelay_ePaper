@@ -412,7 +412,7 @@ class SensorDisplay:
         
         print("[DEBUG] Calendar rendering complete")
 
-    def _draw_wrapped_text_fixed(self, draw, text: str, x: int, y: int, max_width: int, font, color) -> int:
+    def _draw_wrapped_text(self, draw, text: str, x: int, y: int, max_width: int, font, color) -> int:
         """Draw text with proper word wrapping using actual font metrics"""
         words = text.split(' ')
         lines = []
